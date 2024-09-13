@@ -435,7 +435,7 @@ def job_export_url():
 
 
 @register.inclusion_tag("buttons/export.html", takes_context=True)
-def export_button(context, content_type=None, list_element=False):
+def export_button(context, content_type=None, list_element=False, table=None):
     """Display an Export Button/List Element on the page.
 
     Args:
@@ -453,6 +453,13 @@ def export_button(context, content_type=None, list_element=False):
         export_url = None
         include_yaml_option = False
 
+    if table is not None:
+        table_class_path = table.__class__.__module__
+        table_class_name = table.__class__.__name__
+    else:
+        table_class_path = None
+        table_class_name = None
+
     return {
         "export_url": export_url,
         "query_string": context["request"].GET.urlencode(),
@@ -460,4 +467,6 @@ def export_button(context, content_type=None, list_element=False):
         "export_templates": export_templates,
         "include_yaml_option": include_yaml_option,
         "list_element": list_element,
+        "table_class_path": table_class_path,
+        "table_class_name": table_class_name
     }

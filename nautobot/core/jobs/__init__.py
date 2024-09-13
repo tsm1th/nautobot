@@ -1,5 +1,6 @@
 import codecs
 import contextlib
+import importlib
 from io import BytesIO
 
 from django.conf import settings
@@ -21,7 +22,7 @@ from nautobot.core.utils.lookup import get_filterset_for_model
 from nautobot.core.utils.requests import get_filterable_params_from_filter_params
 from nautobot.extras.datasources import ensure_git_repository, git_repository_dry_run, refresh_datasource_content
 from nautobot.extras.jobs import BooleanVar, ChoiceVar, FileVar, Job, ObjectVar, RunJobTaskFailed, StringVar, TextVar
-from nautobot.extras.models import ExportTemplate, GitRepository
+from nautobot.extras.models import ExportTemplate, GitRepository, SavedView
 
 name = "System Jobs"
 
@@ -113,6 +114,18 @@ class ExportObjectList(Job):
         default=None,
         required=False,
     )
+    table_class_path = StringVar(
+        description='Table class module path',
+        label="Table path",
+        default="",
+        required=False,
+    )
+    table_class_name = StringVar(
+        description='Table class name',
+        label="Table name",
+        default="",
+        required=False,
+    )
 
     class Meta:
         name = "Export Object List"
@@ -122,7 +135,7 @@ class ExportObjectList(Job):
         soft_time_limit = 1800
         time_limit = 2000
 
-    def run(self, *, content_type, query_string="", export_format="csv", export_template=None):
+    def run(self, *, content_type, query_string="", export_format="csv", export_template=None, table_class_path="", table_class_name=""):
         if not self.user.has_perm(f"{content_type.app_label}.view_{content_type.model}"):
             self.logger.error('User "%s" does not have permission to view %s objects', self.user, content_type.model)
             raise PermissionDenied("User does not have view permissions on the requested content-type")
@@ -201,8 +214,46 @@ class ExportObjectList(Job):
             # The force_csv=True attribute is a hack, but much easier than trying to construct a valid HttpRequest
             # object from scratch that passes all implicit and explicit assumptions in Django and DRF.
             serializer = serializer_class(queryset, many=True, context={"request": None}, force_csv=True)
-            csv_data = renderer.render(serializer.data)
+            structured_data = serializer.data
+            # If we received the table information then use it to gather data instead
+            if table_class_path and table_class_name:
+                structured_data = self._reconstruct_table_data(table_class_path, table_class_name, query_params, queryset)
+            self.logger.info(structured_data)
+            #csv_data = renderer.render(serializer.data)
+            csv_data = renderer.render(structured_data)
             self.create_file(filename + ".csv", csv_data)
+
+    def _reconstruct_table_data(self, table_class_path, table_class_name, query_params, queryset):
+        """
+        This method will try to reconstruct the original table
+            and parse structured data from its as_values() method.
+        """
+        # We need to try and load any saved views that were passed in.
+        try:
+            saved_view = SavedView.objects.get(id=query_params.get("saved_view"))
+        except SavedView.DoesNotExist:
+            saved_view = None
+        # Load the original table.
+        try:
+            table_object = getattr(importlib.import_module(table_class_path), table_class_name)
+        except ModuleNotFoundError:
+            self.logger.warning(f"Table `{table_class_path}.{table_class_name}` was not found, export will be empty.")
+            return []
+        # Initialize loaded table
+        table = table_object(
+            queryset,
+            user=self.user,
+            table_changes_pending=query_params.get("table_changes_pending", False),
+            saved_view=saved_view
+        )
+        # Capture visible columns in original table
+        visible_columns = [col.verbose_name for col in table.columns if col.visible]
+        # Collect indexes that are not visible and should not be in export
+        indexes_to_remove = [i for i, col in enumerate(next(iter(table.as_values()))) if col not in visible_columns]
+        # Clean the table data by removing columns that are not needed.
+        cleaned_table_data = [[col for i, col in enumerate(row) if i not in indexes_to_remove] for row in table.as_values()]
+        # Restructure data for downstream CSV render method
+        return [dict(zip(cleaned_table_data[0], row)) for row in cleaned_table_data[1:]]
 
 
 class ImportObjects(Job):

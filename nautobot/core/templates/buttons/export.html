@@ -29,6 +29,20 @@
                 </button>
             </form>
         </li>
+        <li>
+            <form action="{{ export_url }}" method="post">
+                {% csrf_token %}
+                <input type="hidden" name="content_type" value="{{ content_type.pk }}">
+                <input type="hidden" name="query_string" value="{{ query_string }}">
+                <input type="hidden" name="_schedule_type" value="immediately">
+                <input type="hidden" name="export_format" value="csv">
+                <input type="hidden" name="table_class_path" value="{{ table_class_path }}">
+                <input type="hidden" name="table_class_name" value="{{ table_class_name }}">
+                <button type="submit">
+                    <span class="mdi mdi-database-export text-muted" aria-hidden="true"></span> Export current table as CSV
+                </button>
+            </form>
+        </li>
         {% if export_templates %}
             {% for et in export_templates %}
                 <li>

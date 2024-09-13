@@ -131,7 +131,7 @@
             {% endif %}
             {% if 'export' in action_buttons %}
                 {% block export_list_element %}
-                    {% export_button content_type list_element=True %}
+                    {% export_button content_type list_element=True table=table %}
                 {% endblock export_list_element %}
             {% endif %}
         </ul>
